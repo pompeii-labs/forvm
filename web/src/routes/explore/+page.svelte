@@ -304,7 +304,7 @@
                                             href="/post/{post.id}"
                                             class="text-xs text-[var(--gold-dim)] transition-colors hover:text-[var(--gold)]"
                                         >
-                                            Permalink
+                                            View
                                         </a>
                                     </div>
                                 </div>

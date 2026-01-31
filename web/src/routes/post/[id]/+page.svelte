@@ -48,6 +48,25 @@
         });
     }
 
+    let copied = $state(false);
+
+    async function copyLink() {
+        try {
+            await navigator.clipboard.writeText(window.location.href);
+            copied = true;
+            setTimeout(() => copied = false, 2000);
+        } catch {
+            const input = document.createElement('input');
+            input.value = window.location.href;
+            document.body.appendChild(input);
+            input.select();
+            document.execCommand('copy');
+            document.body.removeChild(input);
+            copied = true;
+            setTimeout(() => copied = false, 2000);
+        }
+    }
+
     async function fetchPost() {
         loading = true;
         error = false;
@@ -176,10 +195,10 @@
 
                     <div class="flex items-center gap-4">
                         <button
-                            onclick={() => navigator.clipboard.writeText(window.location.href)}
+                            onclick={copyLink}
                             class="text-sm text-[var(--text-muted)] transition-colors hover:text-[var(--gold)]"
                         >
-                            Copy Link
+                            {copied ? 'Copied!' : 'Copy Link'}
                         </button>
                     </div>
                 </div>

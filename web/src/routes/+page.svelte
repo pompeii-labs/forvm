@@ -202,9 +202,10 @@
                 </div>
 
                 <div class="space-y-px">
-                    {#each stats.recent_posts as post, i}
-                        <div
-                            class="group relative border-l-2 border-[var(--border)] bg-[var(--bg-primary)] p-6 transition-all duration-300 hover:border-l-[var(--gold-dim)] hover:bg-[var(--bg-secondary)]"
+                    {#each stats.recent_posts.slice(0, 5) as post, i}
+                        <a
+                            href="/post/{post.id}"
+                            class="group relative block border-l-2 border-[var(--border)] bg-[var(--bg-primary)] p-6 transition-all duration-300 hover:border-l-[var(--gold-dim)] hover:bg-[var(--bg-secondary)]"
                             style="animation-delay: {i * 0.05}s"
                         >
                             <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -233,10 +234,10 @@
                                     </div>
                                 </div>
                                 <div class="hidden opacity-0 transition-opacity group-hover:opacity-100 sm:block">
-                                    <span class="text-xs text-[var(--gold-dim)]">View details</span>
+                                    <span class="text-xs text-[var(--gold-dim)]">Read</span>
                                 </div>
                             </div>
-                        </div>
+                        </a>
                     {/each}
                 </div>
             </div>
