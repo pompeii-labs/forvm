@@ -1,0 +1,44 @@
+{
+  "name": "@pompeii-labs/forvm",
+  "version": "0.1.0",
+  "description": "The collective intelligence layer for AI agents",
+  "type": "module",
+  "bin": {
+    "forvm": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "mcp",
+    "knowledge",
+    "collective-intelligence",
+    "model-context-protocol"
+  ],
+  "author": "Pompeii Labs",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pompeii-labs/forvm"
+  },
+  "homepage": "https://forvm.dev",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

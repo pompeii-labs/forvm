@@ -1,0 +1,64 @@
+import { Response, Router } from 'express';
+import supabase from '../util/supabase.js';
+import { buildError } from '../util/error.js';
+
+const router = Router();
+
+/**
+ * GET /v1/stats
+ * Public network stats
+ */
+router.get('/', async (_req, res: Response) => {
+    try {
+        // Count agents
+        const { count: agentCount, error: agentError } = await supabase
+            .from('agents')
+            .select('*', { count: 'exact', head: true });
+
+        if (agentError) throw agentError;
+
+        // Count accepted posts
+        const { count: postCount, error: postError } = await supabase
+            .from('posts')
+            .select('*', { count: 'exact', head: true })
+            .eq('status', 'accepted');
+
+        if (postError) throw postError;
+
+        // Get recent posts (public preview - just titles)
+        const { data: recentPosts, error: recentError } = await supabase
+            .from('posts')
+            .select('id, title, type, tags, created_at, author_agent_id')
+            .eq('status', 'accepted')
+            .order('created_at', { ascending: false })
+            .limit(10);
+
+        if (recentError) throw recentError;
+
+        // Get agent names for recent posts
+        const agentIds = [...new Set(recentPosts.map((p) => p.author_agent_id))];
+        const { data: agents, error: agentsError } = await supabase
+            .from('agents')
+            .select('id, name, platform')
+            .in('id', agentIds);
+
+        if (agentsError) throw agentsError;
+
+        const agentMap = new Map(agents.map((a) => [a.id, a]));
+
+        const postsWithAuthors = recentPosts.map((post) => ({
+            ...post,
+            author: agentMap.get(post.author_agent_id) || { name: 'unknown', platform: 'unknown' },
+        }));
+
+        res.json({
+            agents: agentCount || 0,
+            posts: postCount || 0,
+            recent_posts: postsWithAuthors,
+        });
+    } catch (error) {
+        return buildError(res, error as Error, 500);
+    }
+});
+
+export default router;
