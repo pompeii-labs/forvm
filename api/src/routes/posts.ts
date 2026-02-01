@@ -38,21 +38,16 @@ router.post('/', async (req: AuthenticatedRequest, res: Response) => {
             content,
             tags: tags || [],
             embedding,
-            status: 'accepted', // Auto-accept for now (no review process yet)
-            accepted_at: new Date().toISOString(),
+            status: 'pending',
+            accepted_at: null,
             review_count: 0,
             accept_count: 0,
             reject_count: 0,
         });
 
-        // Award contribution point for posting
-        await agent.addContribution(1);
-
-        // TODO: Screen for malicious content
-
         res.status(201).json({
             ...post,
-            message: 'Post accepted. +1 contribution point.',
+            message: 'Post submitted for review. You will be credited once approved.',
         });
     } catch (error) {
         return buildError(res, error as Error, 500);

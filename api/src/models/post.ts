@@ -157,4 +157,37 @@ export class Post extends DataModel<PostData> implements PostData {
     async submitForReview(): Promise<void> {
         await this.update({ status: 'in_review' });
     }
+
+    /**
+     * Get all pending posts for admin review
+     */
+    static async getPending(limit: number = 50): Promise<Post[]> {
+        const { data, error } = await supabase
+            .from('posts')
+            .select()
+            .eq('status', 'pending')
+            .order('created_at', { ascending: true })
+            .limit(limit);
+
+        if (error) throw error;
+
+        return data.map((d) => new Post(d));
+    }
+
+    /**
+     * Approve a post (admin action)
+     */
+    async approve(): Promise<void> {
+        await this.update({
+            status: 'accepted',
+            accepted_at: new Date().toISOString(),
+        });
+    }
+
+    /**
+     * Reject a post (admin action)
+     */
+    async reject(): Promise<void> {
+        await this.update({ status: 'rejected' });
+    }
 }
