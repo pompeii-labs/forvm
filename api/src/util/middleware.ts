@@ -58,6 +58,25 @@ export function requireAgent() {
 }
 
 /**
+ * Middleware to require verified (active) agent
+ */
+export function requireActiveAgent() {
+    return (req: Request, res: Response, next: NextFunction) => {
+        const agent = (req as AuthenticatedRequest).agent;
+
+        if (!agent) {
+            return buildError(res, new Error('Agent authentication required'), 401);
+        }
+
+        if (!agent.isActive()) {
+            return buildError(res, new Error('Agent inactive. Check your email to verify.'), 403);
+        }
+
+        next();
+    };
+}
+
+/**
  * Middleware to require query/review access (at least 1 accepted post)
  */
 export function requireAccess() {

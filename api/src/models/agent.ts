@@ -13,7 +13,10 @@ export interface AgentData {
     created_at: string;
     name: string;
     platform: AgentPlatform;
-    owner_id: string;
+    email: string;
+    email_verified: boolean;
+    verification_token: string | null;
+    verification_expires_at: string | null;
     api_key_hash: string;
     contribution_score: number;
     metadata: AgentMetadata;
@@ -24,7 +27,10 @@ export class Agent extends DataModel<AgentData> implements AgentData {
     created_at!: string;
     name!: string;
     platform!: AgentPlatform;
-    owner_id!: string;
+    email!: string;
+    email_verified!: boolean;
+    verification_token!: string | null;
+    verification_expires_at!: string | null;
     api_key_hash!: string;
     contribution_score!: number;
     metadata!: AgentMetadata;
@@ -39,27 +45,91 @@ export class Agent extends DataModel<AgentData> implements AgentData {
 
     /**
      * Register a new agent and return the API key (only time it's visible)
+     * Agent is inactive until email is verified
      */
     static async register(
         name: string,
         platform: AgentPlatform,
-        ownerId: string,
-    ): Promise<{ agent: Agent; apiKey: string }> {
+        email: string,
+    ): Promise<{ agent: Agent; apiKey: string; verificationToken: string }> {
+        // Check if email already has an agent
+        const existing = await Agent.getByEmail(email);
+        if (existing) {
+            throw new Error('An agent is already registered with this email');
+        }
+
         // Generate API key: fvm_<random>
         const apiKey = `fvm_${crypto.randomBytes(24).toString('hex')}`;
         const apiKeyHash = crypto.createHash('sha256').update(apiKey).digest('hex');
 
+        // Generate verification token (expires in 24h)
+        const verificationToken = crypto.randomBytes(32).toString('hex');
+        const verificationExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+
         const agent = await Agent.create({
             name,
             platform,
-            owner_id: ownerId,
+            email: email.toLowerCase(),
+            email_verified: false,
+            verification_token: verificationToken,
+            verification_expires_at: verificationExpiresAt,
             api_key_hash: apiKeyHash,
             contribution_score: 0,
             metadata: {},
             last_active: new Date().toISOString(),
         });
 
-        return { agent, apiKey };
+        return { agent, apiKey, verificationToken };
+    }
+
+    /**
+     * Get agent by email
+     */
+    static async getByEmail(email: string): Promise<Agent | null> {
+        const { data, error } = await supabase
+            .from('agents')
+            .select()
+            .eq('email', email.toLowerCase())
+            .maybeSingle();
+
+        if (error || !data) return null;
+        return new Agent(data);
+    }
+
+    /**
+     * Verify email with token
+     */
+    static async verifyEmail(token: string): Promise<Agent | null> {
+        const { data, error } = await supabase
+            .from('agents')
+            .select()
+            .eq('verification_token', token)
+            .maybeSingle();
+
+        if (error || !data) return null;
+
+        const agent = new Agent(data);
+
+        // Check if token expired
+        if (agent.verification_expires_at && new Date(agent.verification_expires_at) < new Date()) {
+            return null;
+        }
+
+        // Mark as verified
+        await agent.update({
+            email_verified: true,
+            verification_token: null,
+            verification_expires_at: null,
+        });
+
+        return agent;
+    }
+
+    /**
+     * Check if agent is active (email verified)
+     */
+    isActive(): boolean {
+        return this.email_verified;
     }
 
     /**
@@ -124,10 +194,11 @@ export class Agent extends DataModel<AgentData> implements AgentData {
     }
 
     /**
-     * Safe JSON representation (no api_key_hash)
+     * Safe JSON representation (no sensitive fields)
      */
     toJSON() {
-        const { api_key_hash, ...safe } = this as AgentData;
+        const { api_key_hash, verification_token, verification_expires_at, ...safe } =
+            this as AgentData;
         return safe;
     }
 }
