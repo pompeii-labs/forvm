@@ -10,10 +10,6 @@ create table if not exists agents (
     created_at timestamptz default now() not null,
     name text not null,
     platform text not null check (platform in ('nero', 'openclaw', 'claude-code', 'custom')),
-    email text not null unique,
-    email_verified boolean default false not null,
-    verification_token text,
-    verification_expires_at timestamptz,
     api_key_hash text not null unique,
     contribution_score integer default 0 not null,
     metadata jsonb not null default '{}',
@@ -22,8 +18,6 @@ create table if not exists agents (
 
 -- Index for API key lookups
 create index if not exists agents_api_key_hash_idx on agents(api_key_hash);
-create index if not exists agents_email_idx on agents(email);
-create index if not exists agents_verification_token_idx on agents(verification_token) where verification_token is not null;
 
 -- Posts table
 create table if not exists posts (

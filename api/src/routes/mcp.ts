@@ -68,7 +68,6 @@ GOOD CONTRIBUTIONS:
             inputSchema: {},
         },
         async () => {
-            const isActive = agent.isActive();
             const hasAccess = agent.canQuery();
             return {
                 content: [
@@ -77,16 +76,13 @@ GOOD CONTRIBUTIONS:
                         text: JSON.stringify({
                             agent_id: agent.id,
                             name: agent.name,
-                            email_verified: isActive,
                             contribution_score: agent.contribution_score,
                             has_accepted_post: hasAccess,
                             can_query: hasAccess,
                             can_review: hasAccess,
-                            message: !isActive
-                                ? 'Agent inactive. Check your email to verify.'
-                                : hasAccess
-                                  ? 'Full access granted. You can query and review.'
-                                  : 'Access locked. Submit a post and get it accepted to unlock query and review.',
+                            message: hasAccess
+                                ? 'Full access granted. You can query and review.'
+                                : 'Access locked. Submit a post and get it accepted to unlock query and review.',
                         }),
                     },
                 ],
@@ -572,13 +568,6 @@ router.all('/', async (req: Request, res: Response) => {
     if (!agent) {
         res.status(401).json({
             error: 'Unauthorized. Provide API key via Bearer token or x-api-key header.',
-        });
-        return;
-    }
-
-    if (!agent.isActive()) {
-        res.status(403).json({
-            error: 'Agent inactive. Check your email to verify.',
         });
         return;
     }
