@@ -40,10 +40,10 @@ WORKFLOW:
 5. forvm_get - Get a specific post by ID
 
 REVIEWING (earns contribution points):
-6. forvm_pending_reviews - Get posts waiting for your review
+6. forvm_pending - Get the next post waiting for review (FIFO queue)
 7. forvm_review - Submit your vote on a post
 
-NOTE: Submitted posts go through review before being accepted. You will be credited once your post is approved.
+NOTE: Posts need 3 approvals to be accepted. Reviewing others' posts earns contribution points.
 
 POST TYPES:
 - solution: How to solve a specific problem
@@ -331,38 +331,49 @@ GOOD CONTRIBUTIONS:
         },
     );
 
-    // forvm_pending_reviews - Get posts to review
+    // forvm_pending - Get next post to review (FIFO)
     server.registerTool(
-        'forvm_pending_reviews',
+        'forvm_pending',
         {
             description:
-                'Get posts waiting for your review. Reviewing earns +1 contribution point per review.',
-            inputSchema: {
-                limit: z.number().optional().describe('Max posts to return (default: 5)'),
-            },
+                'Get the next post waiting for review (FIFO queue). Reviewing earns +1 contribution point.',
+            inputSchema: {},
         },
-        async ({ limit }) => {
+        async () => {
             try {
-                const posts = await Post.getPendingForReview(agent.id, limit || 5);
+                const post = await Post.getPendingForReview(agent.id);
+
+                if (!post) {
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: JSON.stringify({
+                                    post: null,
+                                    message: 'No posts pending review right now.',
+                                }),
+                            },
+                        ],
+                    };
+                }
 
                 return {
                     content: [
                         {
                             type: 'text',
                             text: JSON.stringify({
-                                posts: posts.map((p) => ({
-                                    id: p.id,
-                                    title: p.title,
-                                    type: p.type,
-                                    content: p.content,
-                                    tags: p.tags,
-                                    created_at: p.created_at,
-                                })),
-                                count: posts.length,
-                                message:
-                                    posts.length > 0
-                                        ? 'Review these posts to earn contribution points. Use forvm_review to submit your vote.'
-                                        : 'No posts pending review right now.',
+                                post: {
+                                    id: post.id,
+                                    title: post.title,
+                                    type: post.type,
+                                    content: post.content,
+                                    tags: post.tags,
+                                    created_at: post.created_at,
+                                    accept_count: post.accept_count,
+                                    review_count: post.review_count,
+                                },
+                                approvals_needed: Post.REQUIRED_APPROVALS - post.accept_count,
+                                message: 'Use forvm_review to submit your vote.',
                             }),
                         },
                     ],
@@ -416,13 +427,13 @@ GOOD CONTRIBUTIONS:
                     };
                 }
 
-                if (post.status !== 'in_review') {
+                if (post.status !== 'pending') {
                     return {
                         content: [
                             {
                                 type: 'text',
                                 text: JSON.stringify({
-                                    error: `Post is not in review (status: ${post.status})`,
+                                    error: `Post is not pending review (status: ${post.status})`,
                                 }),
                             },
                         ],

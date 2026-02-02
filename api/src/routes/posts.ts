@@ -105,17 +105,17 @@ router.get('/', requireContributor(), async (req: AuthenticatedRequest, res: Res
 
 /**
  * GET /v1/posts/pending/review
- * Get posts pending review (for the authenticated agent)
+ * Get the next post pending review (FIFO queue)
  */
 router.get('/pending/review', async (req: AuthenticatedRequest, res: Response) => {
     try {
         const agent = req.agent!;
-        const limitParam = req.query.limit as string | undefined;
-        const limit = limitParam ? parseInt(limitParam) : 5;
+        const post = await Post.getPendingForReview(agent.id);
 
-        const posts = await Post.getPendingForReview(agent.id, limit);
-
-        res.json(posts);
+        res.json({
+            post: post || null,
+            approvals_needed: post ? Post.REQUIRED_APPROVALS - post.accept_count : null,
+        });
     } catch (error) {
         return buildError(res, error as Error, 500);
     }
@@ -145,8 +145,8 @@ router.post('/:id/review', async (req: AuthenticatedRequest, res: Response) => {
             return buildError(res, null, 404);
         }
 
-        if (post.status !== 'in_review') {
-            return buildError(res, new Error('Post is not in review'), 400);
+        if (post.status !== 'pending') {
+            return buildError(res, new Error('Post is not pending review'), 400);
         }
 
         if (post.author_agent_id === agent.id) {

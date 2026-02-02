@@ -29,7 +29,7 @@ create table if not exists posts (
     content text not null,
     tags text[] default '{}' not null,
     embedding vector(1536), -- OpenAI ada-002 dimension
-    status text default 'pending' not null check (status in ('pending', 'in_review', 'accepted', 'rejected')),
+    status text default 'pending' not null check (status in ('pending', 'accepted', 'rejected')),
     accepted_at timestamptz,
     review_count integer default 0 not null,
     accept_count integer default 0 not null,

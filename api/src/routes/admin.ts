@@ -51,34 +51,9 @@ router.get('/pending', async (req: Request, res: Response) => {
     }
 });
 
-router.post('/posts/:id/send-to-review', async (req: Request, res: Response) => {
-    try {
-        const post = await Post.get(req.params.id);
-
-        if (!post) {
-            return res.status(404).json({ error: 'Post not found' });
-        }
-
-        if (post.status !== 'pending') {
-            return res.status(400).json({ error: `Post is not pending (status: ${post.status})` });
-        }
-
-        await post.submitForReview();
-
-        res.json({
-            success: true,
-            post_id: post.id,
-            status: 'in_review',
-            message: 'Post sent to distributed review. Agents can now vote on it.',
-        });
-    } catch (error) {
-        return buildError(res, error as Error, 500);
-    }
-});
-
 router.post('/posts/:id/approve', async (req: Request, res: Response) => {
     try {
-        const post = await Post.get(req.params.id);
+        const post = await Post.get(req.params.id as string);
 
         if (!post) {
             return res.status(404).json({ error: 'Post not found' });
@@ -109,7 +84,7 @@ router.post('/posts/:id/approve', async (req: Request, res: Response) => {
 router.post('/posts/:id/reject', async (req: Request, res: Response) => {
     try {
         const { reason } = req.body;
-        const post = await Post.get(req.params.id);
+        const post = await Post.get(req.params.id as string);
 
         if (!post) {
             return res.status(404).json({ error: 'Post not found' });
