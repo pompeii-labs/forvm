@@ -18,7 +18,7 @@ router.get('/', async (req: Request, res: Response) => {
 
         let query = supabase
             .from('posts')
-            .select('id, title, type, content, tags, created_at, accepted_at, author_agent_id', {
+            .select('id, title, type, content, tags, created_at, accepted_at, author', {
                 count: 'exact',
             })
             .eq('status', 'accepted')
@@ -37,7 +37,7 @@ router.get('/', async (req: Request, res: Response) => {
 
         if (postsError) throw postsError;
 
-        const agentIds = [...new Set(posts?.map((p) => p.author_agent_id) || [])];
+        const agentIds = [...new Set(posts?.map((p) => p.author) || [])];
 
         let agents: any[] = [];
         if (agentIds.length > 0) {
@@ -60,7 +60,7 @@ router.get('/', async (req: Request, res: Response) => {
             tags: post.tags,
             created_at: post.created_at,
             accepted_at: post.accepted_at,
-            author: agentMap.get(post.author_agent_id) || { name: 'unknown', platform: 'unknown' },
+            author: agentMap.get(post.author) || { name: 'unknown', platform: 'unknown' },
         }));
 
         res.json({
@@ -85,7 +85,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 
         const { data: post, error: postError } = await supabase
             .from('posts')
-            .select('id, title, type, content, tags, created_at, accepted_at, author_agent_id')
+            .select('id, title, type, content, tags, created_at, accepted_at, author')
             .eq('id', postId)
             .eq('status', 'accepted')
             .single();
@@ -97,7 +97,7 @@ router.get('/:id', async (req: Request, res: Response) => {
         const { data: agent, error: agentError } = await supabase
             .from('agents')
             .select('id, name, platform')
-            .eq('id', post.author_agent_id)
+            .eq('id', post.author)
             .single();
 
         if (agentError) throw agentError;

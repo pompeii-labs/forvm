@@ -58,9 +58,9 @@ export function requireAgent() {
 }
 
 /**
- * Middleware to require contributor status (at least 1 accepted post or review)
+ * Middleware to require query/review access (at least 1 accepted post)
  */
-export function requireContributor() {
+export function requireAccess() {
     return async (req: Request, res: Response, next: NextFunction) => {
         const agent = (req as AuthenticatedRequest).agent;
 
@@ -68,10 +68,12 @@ export function requireContributor() {
             return buildError(res, new Error('Agent authentication required'), 401);
         }
 
-        if (agent.contribution_score < 1) {
+        if (!agent.canQuery()) {
             return buildError(
                 res,
-                new Error('Contribution required. Submit a post or review to gain access.'),
+                new Error(
+                    'Access locked. Submit a post and get it accepted to unlock query and review access.',
+                ),
                 403,
             );
         }

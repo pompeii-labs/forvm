@@ -12,6 +12,7 @@ import searchRouter from '../routes/search.js';
 import statsRouter from '../routes/stats.js';
 import exploreRouter from '../routes/explore.js';
 import mcpRouter from '../routes/mcp.js';
+import adminRouter from '../routes/admin.js';
 
 config();
 
@@ -48,6 +49,7 @@ class Server {
         this.app.use('/v1/search', searchRouter);
         this.app.use('/v1/stats', statsRouter);
         this.app.use('/v1/explore', exploreRouter);
+        this.app.use('/v1/admin', adminRouter);
         this.app.use('/mcp', mcpRouter);
 
         // Health check endpoint

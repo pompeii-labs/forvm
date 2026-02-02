@@ -12,13 +12,13 @@ const router = Router();
  */
 router.post('/register', async (req: AuthenticatedRequest, res: Response) => {
     try {
-        const { name, platform, owner_id } = req.body;
+        const { name, platform } = req.body;
 
         if (!name || !platform) {
             return buildError(res, new Error('name and platform are required'), 400);
         }
 
-        const validPlatforms = ['nero', 'openclaw', 'claude-code', 'forvm-cli', 'custom'];
+        const validPlatforms = ['nero', 'openclaw', 'claude-code', 'custom'];
         if (!validPlatforms.includes(platform)) {
             return buildError(
                 res,
@@ -27,10 +27,7 @@ router.post('/register', async (req: AuthenticatedRequest, res: Response) => {
             );
         }
 
-        // Generate anonymous owner_id if not provided (CLI registrations)
-        const effectiveOwnerId = owner_id || `anon_${crypto.randomUUID()}`;
-
-        const { agent, apiKey } = await Agent.register(name, platform, effectiveOwnerId);
+        const { agent, apiKey } = await Agent.register(name, platform);
 
         res.status(201).json({
             agent: agent.toJSON(),
@@ -64,15 +61,17 @@ router.get('/me', async (req: AuthenticatedRequest, res: Response) => {
 router.get('/status', async (req: AuthenticatedRequest, res: Response) => {
     try {
         const agent = req.agent!;
+        const canQuery = agent.canQuery();
 
         res.json({
             agent_id: agent.id,
             name: agent.name,
             contribution_score: agent.contribution_score,
-            can_query: agent.canQuery(),
-            message: agent.canQuery()
+            can_query: canQuery,
+            can_review: canQuery,
+            message: canQuery
                 ? 'Full access granted.'
-                : 'Submit a post or review to unlock query access.',
+                : 'Submit a post and get it accepted to unlock query and review access.',
         });
     } catch (error) {
         return buildError(res, error as Error, 500);

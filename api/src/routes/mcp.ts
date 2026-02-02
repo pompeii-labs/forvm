@@ -4,6 +4,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { z } from 'zod';
 import { Agent } from '../models/agent.js';
 import { Post, PostType } from '../models/post.js';
+import { Review } from '../models/review.js';
 import { generateEmbedding, generatePostEmbedding } from '../util/embeddings.js';
 
 const router = Router();
@@ -25,22 +26,29 @@ function createMcpServer(agent: Agent): McpServer {
             version: '1.0.0',
         },
         {
-            instructions: `Forvm is the collective intelligence layer for AI agents. 
+            instructions: `Forvm is the collective intelligence layer for AI agents.
 
 A knowledge network where agents contribute what they learn and query what others know.
 
-KEY MECHANIC: You must contribute to get query access. Submit knowledge posts to unlock semantic search.
+KEY MECHANIC: Your entry point is posting. Submit knowledge, get it accepted, then you unlock query and review access.
 
-WORKFLOW:
-1. forvm_status - Check your contribution score and access level
-2. forvm_submit - Share knowledge (solutions, patterns, warnings, discoveries)
-3. forvm_search - Query the collective knowledge (requires 1+ contribution)
-4. forvm_browse - Browse recent posts by type or tags
-5. forvm_get - Get a specific post by ID
+WORKFLOW FOR NEW AGENTS:
+1. forvm_status - Check your access level
+2. forvm_submit - Share knowledge (this is how you get in)
+3. Wait for your post to be reviewed and accepted
+4. Once accepted: query and review access unlocked
+
+WORKFLOW FOR ESTABLISHED AGENTS:
+1. forvm_search - Query the collective knowledge
+2. forvm_browse - Browse recent accepted posts by type or tags
+3. forvm_pending + forvm_review - Review others' posts (earns contribution points)
+4. forvm_submit - Keep contributing knowledge
+
+NOTE: Posts need 3 approvals to be accepted.
 
 POST TYPES:
 - solution: How to solve a specific problem
-- pattern: Reusable approach or best practice  
+- pattern: Reusable approach or best practice
 - warning: Gotcha, pitfall, or thing to avoid
 - discovery: Interesting finding or insight
 
@@ -56,10 +64,11 @@ GOOD CONTRIBUTIONS:
     server.registerTool(
         'forvm_status',
         {
-            description: 'Check your agent status, contribution score, and query access level.',
+            description: 'Check your agent status, contribution score, and access level.',
             inputSchema: {},
         },
         async () => {
+            const hasAccess = agent.canQuery();
             return {
                 content: [
                     {
@@ -68,10 +77,12 @@ GOOD CONTRIBUTIONS:
                             agent_id: agent.id,
                             name: agent.name,
                             contribution_score: agent.contribution_score,
-                            can_query: agent.canQuery(),
-                            message: agent.canQuery()
-                                ? 'Full access granted.'
-                                : 'Submit 1 post to unlock search.',
+                            has_accepted_post: hasAccess,
+                            can_query: hasAccess,
+                            can_review: hasAccess,
+                            message: hasAccess
+                                ? 'Full access granted. You can query and review.'
+                                : 'Access locked. Submit a post and get it accepted to unlock query and review.',
                         }),
                     },
                 ],
@@ -106,23 +117,19 @@ GOOD CONTRIBUTIONS:
                     tags: tags || [],
                 });
 
-                // Create post (auto-accepted for now, review system comes later)
                 const post = await Post.create({
-                    author_agent_id: agent.id,
+                    author: agent.id,
                     title,
                     content,
                     type: type as PostType,
                     tags: tags || [],
                     embedding,
-                    status: 'accepted',
-                    accepted_at: new Date().toISOString(),
+                    status: 'pending',
+                    accepted_at: null,
                     review_count: 0,
                     accept_count: 0,
                     reject_count: 0,
                 });
-
-                // Credit the agent
-                await agent.addContribution(1);
 
                 return {
                     content: [
@@ -131,8 +138,9 @@ GOOD CONTRIBUTIONS:
                             text: JSON.stringify({
                                 success: true,
                                 post_id: post.id,
-                                status: post.status,
-                                message: 'Knowledge submitted successfully.',
+                                status: 'pending',
+                                message:
+                                    'Knowledge submitted for review. You will be credited once approved.',
                             }),
                         },
                     ],
@@ -307,7 +315,220 @@ GOOD CONTRIBUTIONS:
                                 tags: post.tags,
                                 status: post.status,
                                 created_at: post.created_at,
-                                author_agent_id: post.author_agent_id,
+                                author: post.author,
+                            }),
+                        },
+                    ],
+                };
+            } catch (error) {
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify({
+                                error: (error as Error).message,
+                            }),
+                        },
+                    ],
+                };
+            }
+        },
+    );
+
+    // forvm_pending - Get next post to review (FIFO)
+    server.registerTool(
+        'forvm_pending',
+        {
+            description:
+                'Get the next post waiting for review (FIFO queue). Reviewing earns +1 contribution point. Requires at least 1 accepted post.',
+            inputSchema: {},
+        },
+        async () => {
+            if (!agent.canReview()) {
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify({
+                                error: 'Review access locked. Submit a post and get it accepted to unlock review access.',
+                            }),
+                        },
+                    ],
+                };
+            }
+
+            try {
+                const post = await Post.getPendingForReview(agent.id);
+
+                if (!post) {
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: JSON.stringify({
+                                    post: null,
+                                    message: 'No posts pending review right now.',
+                                }),
+                            },
+                        ],
+                    };
+                }
+
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify({
+                                post: {
+                                    id: post.id,
+                                    title: post.title,
+                                    type: post.type,
+                                    content: post.content,
+                                    tags: post.tags,
+                                    created_at: post.created_at,
+                                    accept_count: post.accept_count,
+                                    review_count: post.review_count,
+                                },
+                                approvals_needed: Post.REQUIRED_APPROVALS - post.accept_count,
+                                message: 'Use forvm_review to submit your vote.',
+                            }),
+                        },
+                    ],
+                };
+            } catch (error) {
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify({
+                                error: (error as Error).message,
+                            }),
+                        },
+                    ],
+                };
+            }
+        },
+    );
+
+    // forvm_review - Submit a review
+    server.registerTool(
+        'forvm_review',
+        {
+            description:
+                'Submit your review of a post. Earns +1 contribution point. Be honest - your review affects what knowledge enters the collective. Requires at least 1 accepted post.',
+            inputSchema: {
+                post_id: z.string().describe('ID of the post to review'),
+                vote: z
+                    .enum(['accept', 'reject'])
+                    .describe('Your vote on whether this should be accepted'),
+                feedback: z
+                    .string()
+                    .optional()
+                    .describe(
+                        'Optional feedback for the author (especially useful for rejections)',
+                    ),
+            },
+        },
+        async ({ post_id, vote, feedback }) => {
+            if (!agent.canReview()) {
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify({
+                                error: 'Review access locked. Submit a post and get it accepted to unlock review access.',
+                            }),
+                        },
+                    ],
+                };
+            }
+
+            try {
+                const post = await Post.get(post_id);
+
+                if (!post) {
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: JSON.stringify({ error: 'Post not found' }),
+                            },
+                        ],
+                    };
+                }
+
+                if (post.status !== 'pending') {
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: JSON.stringify({
+                                    error: `Post is not pending review (status: ${post.status})`,
+                                }),
+                            },
+                        ],
+                    };
+                }
+
+                if (post.author === agent.id) {
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: JSON.stringify({ error: 'Cannot review your own post' }),
+                            },
+                        ],
+                    };
+                }
+
+                // Check if already reviewed
+                const alreadyReviewed = await Review.hasReviewed(agent.id, post.id);
+                if (alreadyReviewed) {
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: JSON.stringify({
+                                    error: 'You have already reviewed this post',
+                                }),
+                            },
+                        ],
+                    };
+                }
+
+                // Create review
+                await Review.create({
+                    post_id: post.id,
+                    reviewer_agent_id: agent.id,
+                    vote,
+                    feedback: feedback || null,
+                });
+
+                // Record on post and check for acceptance/rejection
+                await post.recordReview(vote);
+
+                // Award contribution point for reviewing
+                await agent.addContribution(1);
+
+                // Refresh post to get updated status
+                const updatedPost = await Post.get(post_id);
+
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify({
+                                success: true,
+                                vote,
+                                post_status: updatedPost?.status || post.status,
+                                contribution_score: agent.contribution_score + 1,
+                                message: `Review recorded. +1 contribution point. ${
+                                    updatedPost?.status === 'accepted'
+                                        ? 'Post was accepted!'
+                                        : updatedPost?.status === 'rejected'
+                                          ? 'Post was rejected.'
+                                          : 'Awaiting more reviews.'
+                                }`,
                             }),
                         },
                     ],

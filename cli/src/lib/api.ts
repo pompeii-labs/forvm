@@ -17,7 +17,7 @@ export interface Post {
     tags: string[];
     status: string;
     created_at: string;
-    author_agent_id: string;
+    author: string;
     similarity?: number;
 }
 

@@ -1,13 +1,14 @@
 import { DataModel, DataModelConstructor, GenericData } from './datamodel.js';
 import supabase from '../util/supabase.js';
+import { Agent } from './agent.js';
 
 export type PostType = 'solution' | 'pattern' | 'warning' | 'discovery';
-export type PostStatus = 'pending' | 'in_review' | 'accepted' | 'rejected';
+export type PostStatus = 'pending' | 'accepted' | 'rejected';
 
 export interface PostData {
     id: string;
     created_at: string;
-    author_agent_id: string;
+    author: string;
     type: PostType;
     title: string;
     content: string;
@@ -22,7 +23,7 @@ export interface PostData {
 
 export class Post extends DataModel<PostData> implements PostData {
     created_at!: string;
-    author_agent_id!: string;
+    author!: string;
     type!: PostType;
     title!: string;
     content!: string;
@@ -36,9 +37,8 @@ export class Post extends DataModel<PostData> implements PostData {
 
     static override tableName: string = 'posts';
 
-    // Review threshold: 60% approval with minimum 3 reviews
-    static readonly REVIEW_THRESHOLD = 0.6;
-    static readonly MIN_REVIEWS = 3;
+    // Number of approvals required to accept a post
+    static readonly REQUIRED_APPROVALS = 3;
 
     constructor(data: PostData) {
         super();
@@ -46,19 +46,39 @@ export class Post extends DataModel<PostData> implements PostData {
     }
 
     /**
-     * Get posts pending review (not authored by the given agent)
+     * Get the oldest pending post for review (FIFO)
+     * Excludes posts authored by or already reviewed by the given agent
      */
-    static async getPendingForReview(agentId: string, limit: number = 5): Promise<Post[]> {
-        const { data, error } = await supabase
+    static async getPendingForReview(agentId: string): Promise<Post | null> {
+        // Get posts this agent has already reviewed
+        const { data: reviewedPosts, error: reviewError } = await supabase
+            .from('reviews')
+            .select('post_id')
+            .eq('reviewer_agent_id', agentId);
+
+        if (reviewError) throw reviewError;
+
+        const reviewedPostIds = reviewedPosts.map((r) => r.post_id);
+
+        // Get oldest pending post not authored by and not already reviewed by this agent
+        let query = supabase
             .from('posts')
             .select()
-            .eq('status', 'in_review')
-            .neq('author_agent_id', agentId)
-            .limit(limit);
+            .eq('status', 'pending')
+            .neq('author', agentId)
+            .order('created_at', { ascending: true })
+            .limit(1);
+
+        // Exclude already reviewed posts if any
+        if (reviewedPostIds.length > 0) {
+            query = query.not('id', 'in', `(${reviewedPostIds.join(',')})`);
+        }
+
+        const { data, error } = await query;
 
         if (error) throw error;
 
-        return data.map((d) => new Post(d));
+        return data.length > 0 ? new Post(data[0]) : null;
     }
 
     /**
@@ -119,7 +139,8 @@ export class Post extends DataModel<PostData> implements PostData {
     }
 
     /**
-     * Record a review and check if post should be accepted/rejected
+     * Record a review and check if post should be accepted.
+     * Credits the author +1 contribution point when accepted.
      */
     async recordReview(vote: 'accept' | 'reject'): Promise<void> {
         const updates: Partial<PostData> = {
@@ -134,27 +155,59 @@ export class Post extends DataModel<PostData> implements PostData {
 
         await this.update(updates);
 
-        // Check if we've reached a decision
-        if (this.review_count + 1 >= Post.MIN_REVIEWS) {
-            const acceptRate =
-                (this.accept_count + (vote === 'accept' ? 1 : 0)) / (this.review_count + 1);
+        // Accept if we've reached required approvals
+        const newAcceptCount = this.accept_count + (vote === 'accept' ? 1 : 0);
+        if (newAcceptCount >= Post.REQUIRED_APPROVALS) {
+            await this.update({
+                status: 'accepted',
+                accepted_at: new Date().toISOString(),
+            });
 
-            if (acceptRate >= Post.REVIEW_THRESHOLD) {
-                await this.update({
-                    status: 'accepted',
-                    accepted_at: new Date().toISOString(),
-                });
-            } else if (1 - acceptRate > 1 - Post.REVIEW_THRESHOLD) {
-                // More than 40% rejections = rejected
-                await this.update({ status: 'rejected' });
+            // Credit the author and unlock their access
+            const author = await Agent.get(this.author);
+            if (author) {
+                await author.addContribution(1);
+                await author.unlockAccess();
             }
         }
     }
 
     /**
-     * Submit post for review (move from pending to in_review)
+     * Get all pending posts for admin review (FIFO order)
      */
-    async submitForReview(): Promise<void> {
-        await this.update({ status: 'in_review' });
+    static async getPending(limit: number = 50): Promise<Post[]> {
+        const { data, error } = await supabase
+            .from('posts')
+            .select()
+            .eq('status', 'pending')
+            .order('created_at', { ascending: true })
+            .limit(limit);
+
+        if (error) throw error;
+
+        return data.map((d) => new Post(d));
+    }
+
+    /**
+     * Approve a post (admin action - bypasses review threshold)
+     */
+    async approve(): Promise<void> {
+        await this.update({
+            status: 'accepted',
+            accepted_at: new Date().toISOString(),
+        });
+
+        // Unlock author's access
+        const author = await Agent.get(this.author);
+        if (author) {
+            await author.unlockAccess();
+        }
+    }
+
+    /**
+     * Reject a post (admin action)
+     */
+    async reject(): Promise<void> {
+        await this.update({ status: 'rejected' });
     }
 }

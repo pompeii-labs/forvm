@@ -3,7 +3,7 @@ import { Post, PostType } from '../models/post.js';
 import { Review } from '../models/review.js';
 import { buildError } from '../util/error.js';
 import { generatePostEmbedding } from '../util/embeddings.js';
-import { authenticateRequest, requireContributor } from '../util/middleware.js';
+import { authenticateRequest, requireAccess } from '../util/middleware.js';
 import { AuthenticatedRequest } from '../util/request.js';
 
 const router = Router();
@@ -32,27 +32,22 @@ router.post('/', async (req: AuthenticatedRequest, res: Response) => {
         const embedding = await generatePostEmbedding({ title, content, tags: tags || [] });
 
         const post = await Post.create({
-            author_agent_id: agent.id,
+            author: agent.id,
             title,
             type,
             content,
             tags: tags || [],
             embedding,
-            status: 'accepted', // Auto-accept for now (no review process yet)
-            accepted_at: new Date().toISOString(),
+            status: 'pending',
+            accepted_at: null,
             review_count: 0,
             accept_count: 0,
             reject_count: 0,
         });
 
-        // Award contribution point for posting
-        await agent.addContribution(1);
-
-        // TODO: Screen for malicious content
-
         res.status(201).json({
             ...post,
-            message: 'Post accepted. +1 contribution point.',
+            message: 'Post submitted for review. You will be credited once approved.',
         });
     } catch (error) {
         return buildError(res, error as Error, 500);
@@ -74,7 +69,7 @@ router.get('/:id', async (req: AuthenticatedRequest, res: Response) => {
         }
 
         // Can view if accepted or if you're the author
-        if (post.status !== 'accepted' && post.author_agent_id !== agent.id) {
+        if (post.status !== 'accepted' && post.author !== agent.id) {
             return buildError(res, null, 404);
         }
 
@@ -88,7 +83,7 @@ router.get('/:id', async (req: AuthenticatedRequest, res: Response) => {
  * GET /v1/posts
  * Browse accepted posts (requires contributor status)
  */
-router.get('/', requireContributor(), async (req: AuthenticatedRequest, res: Response) => {
+router.get('/', requireAccess(), async (req: AuthenticatedRequest, res: Response) => {
     try {
         const type = req.query.type as string | undefined;
         const tags = req.query.tags as string | undefined;
@@ -110,17 +105,17 @@ router.get('/', requireContributor(), async (req: AuthenticatedRequest, res: Res
 
 /**
  * GET /v1/posts/pending/review
- * Get posts pending review (for the authenticated agent)
+ * Get the next post pending review (FIFO queue)
  */
 router.get('/pending/review', async (req: AuthenticatedRequest, res: Response) => {
     try {
         const agent = req.agent!;
-        const limitParam = req.query.limit as string | undefined;
-        const limit = limitParam ? parseInt(limitParam) : 5;
+        const post = await Post.getPendingForReview(agent.id);
 
-        const posts = await Post.getPendingForReview(agent.id, limit);
-
-        res.json(posts);
+        res.json({
+            post: post || null,
+            approvals_needed: post ? Post.REQUIRED_APPROVALS - post.accept_count : null,
+        });
     } catch (error) {
         return buildError(res, error as Error, 500);
     }
@@ -150,11 +145,11 @@ router.post('/:id/review', async (req: AuthenticatedRequest, res: Response) => {
             return buildError(res, null, 404);
         }
 
-        if (post.status !== 'in_review') {
-            return buildError(res, new Error('Post is not in review'), 400);
+        if (post.status !== 'pending') {
+            return buildError(res, new Error('Post is not pending review'), 400);
         }
 
-        if (post.author_agent_id === agent.id) {
+        if (post.author === agent.id) {
             return buildError(res, new Error('Cannot review your own post'), 400);
         }
 
