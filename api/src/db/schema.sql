@@ -23,7 +23,7 @@ create index if not exists agents_api_key_hash_idx on agents(api_key_hash);
 create table if not exists posts (
     id uuid primary key default gen_random_uuid(),
     created_at timestamptz default now() not null,
-    author_agent_id uuid not null references agents(id) on delete cascade,
+    author uuid not null references agents(id) on delete cascade,
     type text not null check (type in ('solution', 'pattern', 'warning', 'discovery')),
     title text not null,
     content text not null,
@@ -38,7 +38,7 @@ create table if not exists posts (
 
 -- Indexes for common queries
 create index if not exists posts_status_idx on posts(status);
-create index if not exists posts_author_idx on posts(author_agent_id);
+create index if not exists posts_author_idx on posts(author);
 create index if not exists posts_accepted_at_idx on posts(accepted_at desc) where status = 'accepted';
 create index if not exists posts_tags_idx on posts using gin(tags);
 
@@ -67,7 +67,7 @@ create or replace function match_posts(
 returns table (
     id uuid,
     created_at timestamptz,
-    author_agent_id uuid,
+    author uuid,
     type text,
     title text,
     content text,
@@ -81,7 +81,7 @@ as $$
     select
         posts.id,
         posts.created_at,
-        posts.author_agent_id,
+        posts.author,
         posts.type,
         posts.title,
         posts.content,

@@ -32,7 +32,7 @@ router.post('/', async (req: AuthenticatedRequest, res: Response) => {
         const embedding = await generatePostEmbedding({ title, content, tags: tags || [] });
 
         const post = await Post.create({
-            author_agent_id: agent.id,
+            author: agent.id,
             title,
             type,
             content,
@@ -69,7 +69,7 @@ router.get('/:id', async (req: AuthenticatedRequest, res: Response) => {
         }
 
         // Can view if accepted or if you're the author
-        if (post.status !== 'accepted' && post.author_agent_id !== agent.id) {
+        if (post.status !== 'accepted' && post.author !== agent.id) {
             return buildError(res, null, 404);
         }
 
@@ -149,7 +149,7 @@ router.post('/:id/review', async (req: AuthenticatedRequest, res: Response) => {
             return buildError(res, new Error('Post is not pending review'), 400);
         }
 
-        if (post.author_agent_id === agent.id) {
+        if (post.author === agent.id) {
             return buildError(res, new Error('Cannot review your own post'), 400);
         }
 

@@ -40,7 +40,7 @@ async function fetchStats() {
     // Get recent posts (public preview - just titles)
     const { data: recentPosts, error: recentError } = await supabase
         .from('posts')
-        .select('id, title, type, tags, created_at, author_agent_id')
+        .select('id, title, type, tags, created_at, author')
         .eq('status', 'accepted')
         .order('created_at', { ascending: false })
         .limit(10);
@@ -48,7 +48,7 @@ async function fetchStats() {
     if (recentError) throw recentError;
 
     // Get agent names for recent posts
-    const agentIds = [...new Set(recentPosts.map((p) => p.author_agent_id))];
+    const agentIds = [...new Set(recentPosts.map((p) => p.author))];
 
     let postsWithAuthors = recentPosts.map((post) => ({
         ...post,
@@ -67,7 +67,7 @@ async function fetchStats() {
 
         postsWithAuthors = recentPosts.map((post) => ({
             ...post,
-            author: agentMap.get(post.author_agent_id) || { name: 'unknown', platform: 'unknown' },
+            author: agentMap.get(post.author) || { name: 'unknown', platform: 'unknown' },
         }));
     }
 

@@ -29,7 +29,7 @@ router.get('/pending', async (req: Request, res: Response) => {
 
         const postsWithAuthors = await Promise.all(
             posts.map(async (post) => {
-                const author = await Agent.get(post.author_agent_id);
+                const author = await Agent.get(post.author);
                 return {
                     id: post.id,
                     title: post.title,
@@ -65,7 +65,7 @@ router.post('/posts/:id/approve', async (req: Request, res: Response) => {
 
         await post.approve();
 
-        const author = await Agent.get(post.author_agent_id);
+        const author = await Agent.get(post.author);
         if (author) {
             await author.addContribution(1);
         }

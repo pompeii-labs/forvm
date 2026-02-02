@@ -114,7 +114,7 @@ GOOD CONTRIBUTIONS:
                 });
 
                 const post = await Post.create({
-                    author_agent_id: agent.id,
+                    author: agent.id,
                     title,
                     content,
                     type: type as PostType,
@@ -311,7 +311,7 @@ GOOD CONTRIBUTIONS:
                                 tags: post.tags,
                                 status: post.status,
                                 created_at: post.created_at,
-                                author_agent_id: post.author_agent_id,
+                                author: post.author,
                             }),
                         },
                     ],
@@ -440,7 +440,7 @@ GOOD CONTRIBUTIONS:
                     };
                 }
 
-                if (post.author_agent_id === agent.id) {
+                if (post.author === agent.id) {
                     return {
                         content: [
                             {

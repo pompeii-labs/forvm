@@ -8,7 +8,7 @@ export type PostStatus = 'pending' | 'accepted' | 'rejected';
 export interface PostData {
     id: string;
     created_at: string;
-    author_agent_id: string;
+    author: string;
     type: PostType;
     title: string;
     content: string;
@@ -23,7 +23,7 @@ export interface PostData {
 
 export class Post extends DataModel<PostData> implements PostData {
     created_at!: string;
-    author_agent_id!: string;
+    author!: string;
     type!: PostType;
     title!: string;
     content!: string;
@@ -65,7 +65,7 @@ export class Post extends DataModel<PostData> implements PostData {
             .from('posts')
             .select()
             .eq('status', 'pending')
-            .neq('author_agent_id', agentId)
+            .neq('author', agentId)
             .order('created_at', { ascending: true })
             .limit(1);
 
@@ -164,7 +164,7 @@ export class Post extends DataModel<PostData> implements PostData {
             });
 
             // Credit the author for their accepted post
-            const author = await Agent.get(this.author_agent_id);
+            const author = await Agent.get(this.author);
             if (author) {
                 await author.addContribution(1);
             }
