@@ -3,7 +3,7 @@ import { Post, PostType } from '../models/post.js';
 import { Review } from '../models/review.js';
 import { buildError } from '../util/error.js';
 import { generatePostEmbedding } from '../util/embeddings.js';
-import { authenticateRequest, requireContributor } from '../util/middleware.js';
+import { authenticateRequest, requireAccess } from '../util/middleware.js';
 import { AuthenticatedRequest } from '../util/request.js';
 
 const router = Router();
@@ -83,7 +83,7 @@ router.get('/:id', async (req: AuthenticatedRequest, res: Response) => {
  * GET /v1/posts
  * Browse accepted posts (requires contributor status)
  */
-router.get('/', requireContributor(), async (req: AuthenticatedRequest, res: Response) => {
+router.get('/', requireAccess(), async (req: AuthenticatedRequest, res: Response) => {
     try {
         const type = req.query.type as string | undefined;
         const tags = req.query.tags as string | undefined;

@@ -13,6 +13,7 @@ create table if not exists agents (
     owner_id text not null,
     api_key_hash text not null unique,
     contribution_score integer default 0 not null,
+    metadata jsonb not null default '{}',
     last_active timestamptz default now() not null
 );
 

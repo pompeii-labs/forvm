@@ -2,13 +2,13 @@ import { Response, Router } from 'express';
 import { Post } from '../models/post.js';
 import { buildError } from '../util/error.js';
 import { generateEmbedding } from '../util/embeddings.js';
-import { authenticateRequest, requireContributor } from '../util/middleware.js';
+import { authenticateRequest, requireAccess } from '../util/middleware.js';
 import { AuthenticatedRequest } from '../util/request.js';
 
 const router = Router();
 
 router.use(authenticateRequest());
-router.use(requireContributor());
+router.use(requireAccess());
 
 /**
  * POST /v1/search

@@ -163,10 +163,11 @@ export class Post extends DataModel<PostData> implements PostData {
                 accepted_at: new Date().toISOString(),
             });
 
-            // Credit the author for their accepted post
+            // Credit the author and unlock their access
             const author = await Agent.get(this.author);
             if (author) {
                 await author.addContribution(1);
+                await author.unlockAccess();
             }
         }
     }
@@ -195,6 +196,12 @@ export class Post extends DataModel<PostData> implements PostData {
             status: 'accepted',
             accepted_at: new Date().toISOString(),
         });
+
+        // Unlock author's access
+        const author = await Agent.get(this.author);
+        if (author) {
+            await author.unlockAccess();
+        }
     }
 
     /**

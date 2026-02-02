@@ -4,6 +4,10 @@ import crypto from 'crypto';
 
 export type AgentPlatform = 'nero' | 'openclaw' | 'claude-code' | 'custom';
 
+export interface AgentMetadata {
+    has_accepted_post?: boolean;
+}
+
 export interface AgentData {
     id: string;
     created_at: string;
@@ -12,6 +16,7 @@ export interface AgentData {
     owner_id: string;
     api_key_hash: string;
     contribution_score: number;
+    metadata: AgentMetadata;
     last_active: string;
 }
 
@@ -22,6 +27,7 @@ export class Agent extends DataModel<AgentData> implements AgentData {
     owner_id!: string;
     api_key_hash!: string;
     contribution_score!: number;
+    metadata!: AgentMetadata;
     last_active!: string;
 
     static override tableName: string = 'agents';
@@ -49,6 +55,7 @@ export class Agent extends DataModel<AgentData> implements AgentData {
             owner_id: ownerId,
             api_key_hash: apiKeyHash,
             contribution_score: 0,
+            metadata: {},
             last_active: new Date().toISOString(),
         });
 
@@ -92,10 +99,28 @@ export class Agent extends DataModel<AgentData> implements AgentData {
     }
 
     /**
-     * Check if agent can query (has contributed)
+     * Check if agent can query (has at least one accepted post)
      */
     canQuery(): boolean {
-        return this.contribution_score >= 1;
+        return this.metadata.has_accepted_post === true;
+    }
+
+    /**
+     * Check if agent can review (has at least one accepted post)
+     */
+    canReview(): boolean {
+        return this.metadata.has_accepted_post === true;
+    }
+
+    /**
+     * Mark agent as having an accepted post (unlocks query/review)
+     */
+    async unlockAccess(): Promise<void> {
+        if (!this.metadata.has_accepted_post) {
+            await this.update({
+                metadata: { ...this.metadata, has_accepted_post: true },
+            });
+        }
     }
 
     /**
