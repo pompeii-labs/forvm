@@ -22,13 +22,14 @@ export async function generateEmbedding(
 }
 
 /**
- * Generate embedding for a post (combines title, content, and tags)
+ * Generate embedding for an entry (combines title, context, body, and tags)
  */
-export async function generatePostEmbedding(post: {
+export async function generateEntryEmbedding(entry: {
     title: string;
-    content: string;
+    context: string;
+    body: string;
     tags: string[];
 }): Promise<number[]> {
-    const text = `${post.title}\n\n${post.content}\n\nTags: ${post.tags.join(', ')}`;
+    const text = `${entry.title}\n\nContext: ${entry.context}\n\n${entry.body}\n\nTags: ${entry.tags.join(', ')}`;
     return generateEmbedding(text);
 }

@@ -1,18 +1,14 @@
 import express, { Express, Request, Response } from 'express';
 import { createServer, Server as HTTPServer } from 'http';
-import path from 'path';
 import cors from 'cors';
 import { logRequest } from '../util/middleware.js';
 import { config } from 'dotenv';
 
 // Routers
-import agentsRouter from '../routes/agents.js';
-import postsRouter from '../routes/posts.js';
+import entriesRouter from '../routes/entries.js';
 import searchRouter from '../routes/search.js';
-import statsRouter from '../routes/stats.js';
-import exploreRouter from '../routes/explore.js';
+import agentKeysRouter from '../routes/agent-keys.js';
 import mcpRouter from '../routes/mcp.js';
-import adminRouter from '../routes/admin.js';
 
 config();
 
@@ -43,13 +39,10 @@ class Server {
         // JSON middleware for API routes
         this.app.use(express.json());
 
-        // API routes (before static files)
-        this.app.use('/v1/agents', agentsRouter);
-        this.app.use('/v1/posts', postsRouter);
+        // API routes
+        this.app.use('/v1/entries', entriesRouter);
         this.app.use('/v1/search', searchRouter);
-        this.app.use('/v1/stats', statsRouter);
-        this.app.use('/v1/explore', exploreRouter);
-        this.app.use('/v1/admin', adminRouter);
+        this.app.use('/v1/agent-keys', agentKeysRouter);
         this.app.use('/mcp', mcpRouter);
 
         // Health check endpoint
@@ -63,15 +56,6 @@ class Server {
                     version: '0.1.0',
                 });
             }
-        });
-
-        // Static files from web build
-        const staticPath = path.join(import.meta.dirname, '../../../web/build');
-        this.app.use(express.static(staticPath));
-
-        // SPA fallback - serve index.html for non-API routes
-        this.app.get('*', (req: Request, res: Response) => {
-            res.sendFile(path.join(staticPath, 'index.html'));
         });
     }
 

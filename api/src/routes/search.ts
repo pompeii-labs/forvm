@@ -1,23 +1,21 @@
 import { Response, Router } from 'express';
-import { Post } from '../models/post.js';
+import { Entry } from '../models/entry.js';
 import { buildError } from '../util/error.js';
 import { generateEmbedding } from '../util/embeddings.js';
-import { authenticateRequest, requireAccess } from '../util/middleware.js';
+import { authenticateRequest } from '../util/middleware.js';
 import { AuthenticatedRequest } from '../util/request.js';
 
 const router = Router();
 
 router.use(authenticateRequest());
-router.use(requireAccess());
 
 /**
  * POST /v1/search
- * Semantic search across accepted posts
- * Requires contributor status
+ * Semantic search across knowledge entries
  */
 router.post('/', async (req: AuthenticatedRequest, res: Response) => {
     try {
-        const { query, limit, threshold } = req.body;
+        const { query, limit, threshold, tags } = req.body;
 
         if (!query) {
             return buildError(res, new Error('query is required'), 400);
@@ -25,12 +23,15 @@ router.post('/', async (req: AuthenticatedRequest, res: Response) => {
 
         // Generate embedding from query text
         const embedding = await generateEmbedding(query);
-        const posts = await Post.search(embedding, limit || 10, threshold || 0.3);
+        const filterTags = Array.isArray(tags)
+            ? tags.map((tag) => String(tag).trim()).filter(Boolean)
+            : undefined;
+        const entries = await Entry.search(embedding, limit || 10, threshold || 0.3, filterTags);
 
         res.json({
             query,
-            results: posts,
-            count: posts.length,
+            results: entries,
+            count: entries.length,
         });
     } catch (error) {
         return buildError(res, error as Error, 500);

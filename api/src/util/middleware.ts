@@ -1,83 +1,86 @@
 import { Request, Response, NextFunction } from 'express';
-import { Agent } from '../models/agent.js';
+import { AgentKey } from '../models/agent-key.js';
 import { buildError } from './error.js';
 import { AuthenticatedRequest } from './request.js';
 import chalk from 'chalk';
+import supabase from './supabase.js';
 
-/**
- * Validate API key and attach agent to request
- */
-async function validateApiKey(req: Request, key: string): Promise<boolean> {
-    const agent = await Agent.validateApiKey(key);
+function normalizeHeaderValue(value: string | string[] | undefined): string | undefined {
+    if (Array.isArray(value)) {
+        return value[0];
+    }
+    return value;
+}
 
-    if (!agent) return false;
+async function authenticateWithApiKey(req: Request, rawKey: string): Promise<boolean> {
+    const agentKey = await AgentKey.validateKey(rawKey);
+    if (!agentKey) {
+        return false;
+    }
 
-    (req as AuthenticatedRequest).agent = agent;
-
+    const authReq = req as AuthenticatedRequest;
+    authReq.userId = agentKey.user_id;
+    authReq.agentKeyLabel = agentKey.label;
     return true;
 }
 
-/**
- * Middleware to authenticate requests via API key
- */
+async function authenticateWithJwt(req: Request, token: string): Promise<boolean> {
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error || !data.user) {
+        return false;
+    }
+
+    const authReq = req as AuthenticatedRequest;
+    authReq.userId = data.user.id;
+    authReq.agentKeyLabel = undefined;
+    return true;
+}
+
 export function authenticateRequest() {
-    return async (req: Request, res: Response, next: NextFunction) => {
-        try {
-            // Check x-api-key header
-            const xApiKey = req.headers['x-api-key'] as string | undefined;
-            if (xApiKey) {
-                const result = await validateApiKey(req, xApiKey);
-                if (result) return next();
-            }
-
-            // Check Authorization: Bearer header
-            const authHeader = req.headers['authorization'] as string | undefined;
-            if (authHeader?.startsWith('Bearer ')) {
-                const token = authHeader.slice(7);
-                const result = await validateApiKey(req, token);
-                if (result) return next();
-            }
-        } catch (error) {
-            console.error('Auth error:', error);
-        }
-
-        return buildError(res, new Error('Authentication Failed'), 401);
-    };
-}
-
-/**
- * Middleware to require authenticated agent
- */
-export function requireAgent() {
     return (req: Request, res: Response, next: NextFunction) => {
-        if (!(req as AuthenticatedRequest).agent) {
-            return buildError(res, new Error('Agent authentication required'), 401);
-        }
-        next();
+        const run = async () => {
+            try {
+                const xApiKey = normalizeHeaderValue(req.headers['x-api-key']);
+                if (xApiKey && xApiKey.startsWith('fvm_')) {
+                    const ok = await authenticateWithApiKey(req, xApiKey);
+                    if (ok) return next();
+                }
+
+                const authHeader = normalizeHeaderValue(req.headers['authorization']);
+                if (authHeader?.startsWith('Bearer ')) {
+                    const token = authHeader.slice(7).trim();
+
+                    if (token.startsWith('fvm_')) {
+                        const ok = await authenticateWithApiKey(req, token);
+                        if (ok) return next();
+                    } else {
+                        const ok = await authenticateWithJwt(req, token);
+                        if (ok) return next();
+                    }
+                }
+            } catch (error) {
+                console.error('Auth error:', error);
+            }
+
+            return buildError(res, new Error('Authentication Failed'), 401);
+        };
+
+        run().catch((error) => {
+            console.error('Auth middleware error:', error);
+            return buildError(res, new Error('Authentication Failed'), 401);
+        });
     };
 }
 
-/**
- * Middleware to require query/review access (at least 1 accepted post)
- */
-export function requireAccess() {
-    return async (req: Request, res: Response, next: NextFunction) => {
-        const agent = (req as AuthenticatedRequest).agent;
-
-        if (!agent) {
-            return buildError(res, new Error('Agent authentication required'), 401);
+export function requireJwtAuth() {
+    return (req: Request, res: Response, next: NextFunction) => {
+        const authReq = req as AuthenticatedRequest;
+        if (!authReq.userId) {
+            return buildError(res, new Error('Authentication required'), 401);
         }
-
-        if (!agent.canQuery()) {
-            return buildError(
-                res,
-                new Error(
-                    'Access locked. Submit a post and get it accepted to unlock query and review access.',
-                ),
-                403,
-            );
+        if (authReq.agentKeyLabel) {
+            return buildError(res, new Error('Supabase JWT required for this endpoint'), 403);
         }
-
         next();
     };
 }
