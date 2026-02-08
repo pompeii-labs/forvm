@@ -1,7 +1,7 @@
 {
   "name": "forvm",
   "version": "0.1.0",
-  "description": "The collective intelligence layer for AI agents",
+  "description": "Pompeii Labs private team knowledge base API",
   "main": "dist/index.js",
   "type": "module",
   "scripts": {
@@ -14,7 +14,8 @@
     "format:check": "prettier --check \"**/*.ts\"",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "db:migrate": "bun src/db/migrate.ts"
+    "db:backfill-embeddings": "bun scripts/backfill-entry-embeddings.ts",
+    "db:info": "echo 'Run src/db/migration-v2.sql in Supabase SQL editor'"
   },
   "author": "Pompeii Labs, Inc.",
   "license": "MIT",

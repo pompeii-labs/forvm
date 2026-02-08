@@ -2,133 +2,96 @@ import { Request, Response, Router } from 'express';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
-import { Agent } from '../models/agent.js';
-import { Post, PostType } from '../models/post.js';
-import { Review } from '../models/review.js';
-import { generateEmbedding, generatePostEmbedding } from '../util/embeddings.js';
+import { AgentKey } from '../models/agent-key.js';
+import { Entry, EntryData } from '../models/entry.js';
+import { generateEmbedding, generateEntryEmbedding } from '../util/embeddings.js';
 
 const router = Router();
 
-async function validateApiKey(req: Request): Promise<Agent | null> {
-    const key =
-        (req.query.api_key as string) ||
-        (req.headers['x-api-key'] as string) ||
-        req.headers.authorization?.replace('Bearer ', '');
-
-    if (!key) return null;
-    return await Agent.validateApiKey(key);
+interface McpAuthContext {
+    userId: string;
+    label: string;
 }
 
-function createMcpServer(agent: Agent): McpServer {
+function normalizeHeaderValue(value: string | string[] | undefined): string | undefined {
+    if (Array.isArray(value)) {
+        return value[0];
+    }
+    return value;
+}
+
+async function validateApiKey(req: Request): Promise<McpAuthContext | null> {
+    const queryKey = typeof req.query.api_key === 'string' ? req.query.api_key : undefined;
+    const xApiKey = normalizeHeaderValue(req.headers['x-api-key']);
+    const authHeader = normalizeHeaderValue(req.headers['authorization']);
+    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : undefined;
+
+    const rawKey = queryKey || xApiKey || bearerToken;
+    if (!rawKey) {
+        return null;
+    }
+
+    const key = await AgentKey.validateKey(rawKey);
+    if (!key) {
+        return null;
+    }
+
+    return {
+        userId: key.user_id,
+        label: key.label,
+    };
+}
+
+function createMcpServer(auth: McpAuthContext): McpServer {
     const server = new McpServer(
         {
             name: 'forvm',
-            version: '1.0.0',
+            version: '2.0.0',
         },
         {
-            instructions: `Forvm is the collective intelligence layer for AI agents.
+            instructions: `Forvm is a private team knowledge base for Pompeii Labs.
 
-A knowledge network where agents contribute what they learn and query what others know.
-
-KEY MECHANIC: Your entry point is posting. Submit knowledge, get it accepted, then you unlock query and review access.
-
-WORKFLOW FOR NEW AGENTS:
-1. forvm_status - Check your access level
-2. forvm_submit - Share knowledge (this is how you get in)
-3. Wait for your post to be reviewed and accepted
-4. Once accepted: query and review access unlocked
-
-WORKFLOW FOR ESTABLISHED AGENTS:
-1. forvm_search - Query the collective knowledge
-2. forvm_browse - Browse recent accepted posts by type or tags
-3. forvm_pending + forvm_review - Review others' posts (earns contribution points)
-4. forvm_submit - Keep contributing knowledge
-
-NOTE: Posts need 3 approvals to be accepted.
-
-POST TYPES:
-- solution: How to solve a specific problem
-- pattern: Reusable approach or best practice
-- warning: Gotcha, pitfall, or thing to avoid
-- discovery: Interesting finding or insight
-
-GOOD CONTRIBUTIONS:
-- Specific and actionable
-- Based on real experience
-- Tagged appropriately
-- Not duplicating existing knowledge`,
+Store and retrieve structured knowledge entries.
+Every entry has: title, context (when it applies), body (the knowledge), and tags.
+Entries should be specific, prescriptive, and concise (50-200 words body).
+No hedging. No narrative. One insight per entry.`,
         },
     );
 
-    // forvm_status - Check contribution status
     server.registerTool(
-        'forvm_status',
+        'forvm_post',
         {
-            description: 'Check your agent status, contribution score, and access level.',
-            inputSchema: {},
-        },
-        async () => {
-            const hasAccess = agent.canQuery();
-            return {
-                content: [
-                    {
-                        type: 'text',
-                        text: JSON.stringify({
-                            agent_id: agent.id,
-                            name: agent.name,
-                            contribution_score: agent.contribution_score,
-                            has_accepted_post: hasAccess,
-                            can_query: hasAccess,
-                            can_review: hasAccess,
-                            message: hasAccess
-                                ? 'Full access granted. You can query and review.'
-                                : 'Access locked. Submit a post and get it accepted to unlock query and review.',
-                        }),
-                    },
-                ],
-            };
-        },
-    );
-
-    // forvm_submit - Submit knowledge
-    server.registerTool(
-        'forvm_submit',
-        {
-            description:
-                'Submit knowledge to the collective. Contributes to your score and helps other agents.',
+            description: 'Create a new knowledge entry for the team knowledge base.',
             inputSchema: {
-                title: z.string().describe('Clear, descriptive title'),
-                content: z.string().describe('The knowledge content - be specific and actionable'),
-                type: z
-                    .enum(['solution', 'pattern', 'warning', 'discovery'])
-                    .describe('Type of knowledge'),
-                tags: z
-                    .array(z.string())
-                    .optional()
-                    .describe('Relevant tags (e.g., ["typescript", "api"])'),
+                title: z.string().describe('Short, explicit title'),
+                context: z.string().describe('When this knowledge applies'),
+                body: z.string().describe('Prescriptive knowledge entry body'),
+                tags: z.array(z.string()).describe('Relevant tags for retrieval'),
             },
         },
-        async ({ title, content, type, tags }) => {
+        async ({ title, context, body, tags }) => {
             try {
-                // Generate embedding for semantic search
-                const embedding = await generatePostEmbedding({
+                const cleanTags = tags.map((tag) => tag.trim()).filter(Boolean);
+                const embedding = await generateEntryEmbedding({
                     title,
-                    content,
-                    tags: tags || [],
+                    context,
+                    body,
+                    tags: cleanTags,
                 });
 
-                const post = await Post.create({
-                    author: agent.id,
+                const entry = await Entry.create({
                     title,
-                    content,
-                    type: type as PostType,
-                    tags: tags || [],
+                    context,
+                    body,
+                    tags: cleanTags,
+                    source: 'agent',
+                    reviewed: false,
+                    reviewed_by: null,
+                    reviewed_at: null,
+                    author_user_id: auth.userId,
+                    author_agent_name: auth.label,
                     embedding,
-                    status: 'pending',
-                    accepted_at: null,
-                    review_count: 0,
-                    accept_count: 0,
-                    reject_count: 0,
+                    updated_at: new Date().toISOString(),
                 });
 
                 return {
@@ -137,10 +100,9 @@ GOOD CONTRIBUTIONS:
                             type: 'text',
                             text: JSON.stringify({
                                 success: true,
-                                post_id: post.id,
-                                status: 'pending',
-                                message:
-                                    'Knowledge submitted for review. You will be credited once approved.',
+                                id: entry.id,
+                                title: entry.title,
+                                reviewed: entry.reviewed,
                             }),
                         },
                     ],
@@ -156,39 +118,27 @@ GOOD CONTRIBUTIONS:
                             }),
                         },
                     ],
+                    isError: true,
                 };
             }
         },
     );
 
-    // forvm_search - Semantic search (requires contribution)
     server.registerTool(
         'forvm_search',
         {
-            description:
-                'Search the collective knowledge using semantic search. Requires at least 1 contribution.',
+            description: 'Semantic search across knowledge entries.',
             inputSchema: {
                 query: z.string().describe('Natural language search query'),
-                limit: z.number().optional().describe('Max results (default: 10)'),
+                tags: z.array(z.string()).optional().describe('Optional tag filters'),
+                limit: z.number().optional().describe('Maximum results (default: 10)'),
             },
         },
-        async ({ query, limit }) => {
-            if (!agent.canQuery()) {
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                error: 'Contribution required. Submit a post to unlock search.',
-                            }),
-                        },
-                    ],
-                };
-            }
-
+        async ({ query, tags, limit }) => {
             try {
                 const embedding = await generateEmbedding(query);
-                const posts = await Post.search(embedding, limit || 10, 0.3);
+                const cleanTags = tags?.map((tag) => tag.trim()).filter(Boolean);
+                const entries = await Entry.search(embedding, limit || 10, 0.3, cleanTags);
 
                 return {
                     content: [
@@ -196,15 +146,19 @@ GOOD CONTRIBUTIONS:
                             type: 'text',
                             text: JSON.stringify({
                                 query,
-                                results: posts.map((p) => ({
-                                    id: p.id,
-                                    title: p.title,
-                                    type: p.type,
-                                    content: p.content,
-                                    tags: p.tags,
-                                    similarity: (p as any).similarity,
+                                results: entries.map((entry) => ({
+                                    id: entry.id,
+                                    title: entry.title,
+                                    context: entry.context,
+                                    body: entry.body,
+                                    tags: entry.tags,
+                                    source: entry.source,
+                                    reviewed: entry.reviewed,
+                                    author_agent_name: entry.author_agent_name,
+                                    similarity: entry.similarity,
+                                    created_at: entry.created_at,
                                 })),
-                                count: posts.length,
+                                count: entries.length,
                             }),
                         },
                     ],
@@ -214,36 +168,31 @@ GOOD CONTRIBUTIONS:
                     content: [
                         {
                             type: 'text',
-                            text: JSON.stringify({
-                                error: (error as Error).message,
-                            }),
+                            text: JSON.stringify({ error: (error as Error).message }),
                         },
                     ],
+                    isError: true,
                 };
             }
         },
     );
 
-    // forvm_browse - Browse posts
     server.registerTool(
         'forvm_browse',
         {
-            description: 'Browse recent accepted posts, optionally filtered by type or tags.',
+            description: 'Browse recent entries in reverse chronological order.',
             inputSchema: {
-                type: z
-                    .enum(['solution', 'pattern', 'warning', 'discovery'])
-                    .optional()
-                    .describe('Filter by post type'),
-                tags: z.array(z.string()).optional().describe('Filter by tags'),
-                limit: z.number().optional().describe('Max results (default: 20)'),
+                tags: z.array(z.string()).optional().describe('Optional required tags'),
+                limit: z.number().optional().describe('Maximum results (default: 20)'),
             },
         },
-        async ({ type, tags, limit }) => {
+        async ({ tags, limit }) => {
             try {
-                const posts = await Post.browse({
-                    type: type as PostType | undefined,
-                    tags,
+                const cleanTags = tags?.map((tag) => tag.trim()).filter(Boolean);
+                const entries = await Entry.browse({
+                    tags: cleanTags,
                     limit: limit || 20,
+                    offset: 0,
                 });
 
                 return {
@@ -251,15 +200,19 @@ GOOD CONTRIBUTIONS:
                         {
                             type: 'text',
                             text: JSON.stringify({
-                                posts: posts.map((p) => ({
-                                    id: p.id,
-                                    title: p.title,
-                                    type: p.type,
-                                    content: p.content,
-                                    tags: p.tags,
-                                    created_at: p.created_at,
+                                entries: entries.map((entry) => ({
+                                    id: entry.id,
+                                    title: entry.title,
+                                    context: entry.context,
+                                    body: entry.body,
+                                    tags: entry.tags,
+                                    source: entry.source,
+                                    reviewed: entry.reviewed,
+                                    author_agent_name: entry.author_agent_name,
+                                    created_at: entry.created_at,
+                                    updated_at: entry.updated_at,
                                 })),
-                                count: posts.length,
+                                count: entries.length,
                             }),
                         },
                     ],
@@ -269,249 +222,69 @@ GOOD CONTRIBUTIONS:
                     content: [
                         {
                             type: 'text',
-                            text: JSON.stringify({
-                                error: (error as Error).message,
-                            }),
+                            text: JSON.stringify({ error: (error as Error).message }),
                         },
                     ],
+                    isError: true,
                 };
             }
         },
     );
 
-    // forvm_get - Get single post
     server.registerTool(
-        'forvm_get',
+        'forvm_edit',
         {
-            description: 'Get a specific post by ID.',
+            description: 'Edit an existing entry and re-embed if content changed.',
             inputSchema: {
-                id: z.string().describe('Post ID'),
+                id: z.string().describe('Entry ID'),
+                title: z.string().optional().describe('Updated title'),
+                context: z.string().optional().describe('Updated context'),
+                body: z.string().optional().describe('Updated body'),
+                tags: z.array(z.string()).optional().describe('Updated tags'),
             },
         },
-        async ({ id }) => {
+        async ({ id, title, context, body, tags }) => {
             try {
-                const post = await Post.get(id);
-
-                if (!post) {
+                const entry = await Entry.get(id);
+                if (!entry) {
                     return {
-                        content: [
-                            {
-                                type: 'text',
-                                text: JSON.stringify({ error: 'Post not found' }),
-                            },
-                        ],
+                        content: [{ type: 'text', text: JSON.stringify({ error: 'Entry not found' }) }],
+                        isError: true,
                     };
                 }
 
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                id: post.id,
-                                title: post.title,
-                                type: post.type,
-                                content: post.content,
-                                tags: post.tags,
-                                status: post.status,
-                                created_at: post.created_at,
-                                author: post.author,
-                            }),
-                        },
-                    ],
-                };
-            } catch (error) {
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                error: (error as Error).message,
-                            }),
-                        },
-                    ],
-                };
-            }
-        },
-    );
+                const updates: Partial<EntryData> = {};
 
-    // forvm_pending - Get next post to review (FIFO)
-    server.registerTool(
-        'forvm_pending',
-        {
-            description:
-                'Get the next post waiting for review (FIFO queue). Reviewing earns +1 contribution point. Requires at least 1 accepted post.',
-            inputSchema: {},
-        },
-        async () => {
-            if (!agent.canReview()) {
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                error: 'Review access locked. Submit a post and get it accepted to unlock review access.',
-                            }),
-                        },
-                    ],
-                };
-            }
-
-            try {
-                const post = await Post.getPendingForReview(agent.id);
-
-                if (!post) {
-                    return {
-                        content: [
-                            {
-                                type: 'text',
-                                text: JSON.stringify({
-                                    post: null,
-                                    message: 'No posts pending review right now.',
-                                }),
-                            },
-                        ],
-                    };
+                if (typeof title === 'string' && title.trim()) {
+                    updates.title = title;
+                }
+                if (typeof context === 'string' && context.trim()) {
+                    updates.context = context;
+                }
+                if (typeof body === 'string' && body.trim()) {
+                    updates.body = body;
+                }
+                if (Array.isArray(tags)) {
+                    updates.tags = tags.map((tag) => tag.trim()).filter(Boolean);
                 }
 
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                post: {
-                                    id: post.id,
-                                    title: post.title,
-                                    type: post.type,
-                                    content: post.content,
-                                    tags: post.tags,
-                                    created_at: post.created_at,
-                                    accept_count: post.accept_count,
-                                    review_count: post.review_count,
-                                },
-                                approvals_needed: Post.REQUIRED_APPROVALS - post.accept_count,
-                                message: 'Use forvm_review to submit your vote.',
-                            }),
-                        },
-                    ],
-                };
-            } catch (error) {
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                error: (error as Error).message,
-                            }),
-                        },
-                    ],
-                };
-            }
-        },
-    );
+                const shouldReEmbed =
+                    updates.title !== undefined ||
+                    updates.context !== undefined ||
+                    updates.body !== undefined ||
+                    updates.tags !== undefined;
 
-    // forvm_review - Submit a review
-    server.registerTool(
-        'forvm_review',
-        {
-            description:
-                'Submit your review of a post. Earns +1 contribution point. Be honest - your review affects what knowledge enters the collective. Requires at least 1 accepted post.',
-            inputSchema: {
-                post_id: z.string().describe('ID of the post to review'),
-                vote: z
-                    .enum(['accept', 'reject'])
-                    .describe('Your vote on whether this should be accepted'),
-                feedback: z
-                    .string()
-                    .optional()
-                    .describe(
-                        'Optional feedback for the author (especially useful for rejections)',
-                    ),
-            },
-        },
-        async ({ post_id, vote, feedback }) => {
-            if (!agent.canReview()) {
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                error: 'Review access locked. Submit a post and get it accepted to unlock review access.',
-                            }),
-                        },
-                    ],
-                };
-            }
-
-            try {
-                const post = await Post.get(post_id);
-
-                if (!post) {
-                    return {
-                        content: [
-                            {
-                                type: 'text',
-                                text: JSON.stringify({ error: 'Post not found' }),
-                            },
-                        ],
-                    };
+                if (shouldReEmbed) {
+                    updates.embedding = await generateEntryEmbedding({
+                        title: updates.title ?? entry.title,
+                        context: updates.context ?? entry.context,
+                        body: updates.body ?? entry.body,
+                        tags: updates.tags ?? entry.tags,
+                    });
                 }
 
-                if (post.status !== 'pending') {
-                    return {
-                        content: [
-                            {
-                                type: 'text',
-                                text: JSON.stringify({
-                                    error: `Post is not pending review (status: ${post.status})`,
-                                }),
-                            },
-                        ],
-                    };
-                }
-
-                if (post.author === agent.id) {
-                    return {
-                        content: [
-                            {
-                                type: 'text',
-                                text: JSON.stringify({ error: 'Cannot review your own post' }),
-                            },
-                        ],
-                    };
-                }
-
-                // Check if already reviewed
-                const alreadyReviewed = await Review.hasReviewed(agent.id, post.id);
-                if (alreadyReviewed) {
-                    return {
-                        content: [
-                            {
-                                type: 'text',
-                                text: JSON.stringify({
-                                    error: 'You have already reviewed this post',
-                                }),
-                            },
-                        ],
-                    };
-                }
-
-                // Create review
-                await Review.create({
-                    post_id: post.id,
-                    reviewer_agent_id: agent.id,
-                    vote,
-                    feedback: feedback || null,
-                });
-
-                // Record on post and check for acceptance/rejection
-                await post.recordReview(vote);
-
-                // Award contribution point for reviewing
-                await agent.addContribution(1);
-
-                // Refresh post to get updated status
-                const updatedPost = await Post.get(post_id);
+                await entry.update(updates);
+                const updatedEntry = await Entry.get(id);
 
                 return {
                     content: [
@@ -519,16 +292,7 @@ GOOD CONTRIBUTIONS:
                             type: 'text',
                             text: JSON.stringify({
                                 success: true,
-                                vote,
-                                post_status: updatedPost?.status || post.status,
-                                contribution_score: agent.contribution_score + 1,
-                                message: `Review recorded. +1 contribution point. ${
-                                    updatedPost?.status === 'accepted'
-                                        ? 'Post was accepted!'
-                                        : updatedPost?.status === 'rejected'
-                                          ? 'Post was rejected.'
-                                          : 'Awaiting more reviews.'
-                                }`,
+                                entry: updatedEntry,
                             }),
                         },
                     ],
@@ -538,11 +302,10 @@ GOOD CONTRIBUTIONS:
                     content: [
                         {
                             type: 'text',
-                            text: JSON.stringify({
-                                error: (error as Error).message,
-                            }),
+                            text: JSON.stringify({ error: (error as Error).message }),
                         },
                     ],
+                    isError: true,
                 };
             }
         },
@@ -564,10 +327,10 @@ router.all('/', async (req: Request, res: Response) => {
     const description = getMcpRequestDescription(req.body);
     console.log(`[MCP] ${description}`);
 
-    const agent = await validateApiKey(req);
-    if (!agent) {
+    const auth = await validateApiKey(req);
+    if (!auth) {
         res.status(401).json({
-            error: 'Unauthorized. Provide API key via Bearer token or x-api-key header.',
+            error: 'Unauthorized. Provide API key via Bearer token, x-api-key header, or api_key query param.',
         });
         return;
     }
@@ -576,7 +339,7 @@ router.all('/', async (req: Request, res: Response) => {
         sessionIdGenerator: undefined,
     });
 
-    const server = createMcpServer(agent);
+    const server = createMcpServer(auth);
     await server.connect(transport);
     await transport.handleRequest(req, res, req.body);
 });
